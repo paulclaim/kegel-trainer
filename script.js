@@ -14,6 +14,11 @@ class KegelTrainer {
         this.timerStartTime = null;
         this.timerDuration = 0;
 
+        // 主题状态
+        this.currentTheme = null;
+        this.themeQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+        this.themeTransitionTimer = null;
+
         this.wakeLockManager = new WakeLockManager();
         this.audioManager = new AudioManager();
         this.initAudio();
@@ -28,6 +33,10 @@ class KegelTrainer {
         this.initElements();
         this.bindEvents();
         this.loadSettings();
+        this.initThemeUI();
+        this.initTabs();
+        this.bindKeyboardShortcuts();
+        this.updateProgress();
         this.loadReminderSettings();
         this.initBackgroundSupport();
         this.loadStats();
@@ -45,10 +54,11 @@ class KegelTrainer {
 
     initElements() {
         const ids = ['startBtn', 'pauseBtn', 'resetBtn', 'exportBtn', 'importBtn', 'currentSet',
-                     'currentRep', 'timer', 'actionText', 'progressFill', 'animationCircle',
+                     'currentRep', 'timer', 'actionText', 'progressRing', 'animationCircle',
                      'repsPerSet', 'totalSets', 'contractTime', 'relaxTime', 'totalDays',
                      'totalSessions', 'streak', 'totalTime', 'presetBtns', 'soundToggle',
-                     'syncToggle', 'syncStatus', 'reminderToggle', 'reminderTime'];
+                     'syncToggle', 'syncStatus', 'reminderToggle', 'reminderTime',
+                     'startBtnLabel', 'themeBtn', 'themeMenu', 'themeGrid'];
 
         this.elements = {};
         ids.forEach(id => {
@@ -63,6 +73,7 @@ class KegelTrainer {
         this.elements.resetBtn?.addEventListener('click', () => this.reset());
         this.elements.exportBtn?.addEventListener('click', () => this.exportData());
         this.elements.importBtn?.addEventListener('click', () => this.importData());
+        this.elements.themeBtn?.addEventListener('click', () => this.toggleThemeMenu());
         this.elements.soundToggle?.addEventListener('change', (e) => {
             this.audioManager.enabled = e.target.checked;
             this.saveSettings();
@@ -81,6 +92,14 @@ class KegelTrainer {
         // 使用缓存的预设按钮
         this.presetBtns.forEach(btn => {
             btn.addEventListener('click', () => this.loadPreset(btn.dataset.preset));
+        });
+
+        // 点击主题菜单外部时关闭
+        document.addEventListener('click', (e) => {
+            if (this.elements.themeMenu && !this.elements.themeMenu.hidden &&
+                !e.target.closest('.theme-menu-wrap')) {
+                this.closeThemeMenu();
+            }
         });
 
         window.addEventListener('beforeunload', () => {
@@ -111,6 +130,12 @@ class KegelTrainer {
         if (this.elements.syncToggle) {
             this.elements.syncToggle.checked = this.dataSyncManager.syncEnabled;
         }
+
+        // 应用已保存的主题
+        const themeValid = CONFIG.THEMES.some(t => t.id === settings.theme);
+        this.applyTheme(themeValid ? settings.theme : CONFIG.DEFAULT_SETTINGS.theme, { silent: true });
+
+        this.updatePresetHighlight();
         this.updateSyncStatus();
     }
 
@@ -125,10 +150,192 @@ class KegelTrainer {
             contractTime: toInt(this.elements.contractTime?.value, CONFIG.DEFAULT_SETTINGS.contractTime),
             relaxTime: toInt(this.elements.relaxTime?.value, CONFIG.DEFAULT_SETTINGS.relaxTime),
             restTime: toInt(this.restTime, CONFIG.DEFAULT_SETTINGS.restTime),
-            soundEnabled: this.elements.soundToggle?.checked ?? true
+            soundEnabled: this.elements.soundToggle?.checked ?? true,
+            theme: this.currentTheme || CONFIG.DEFAULT_SETTINGS.theme
         };
         StorageManager.set(CONFIG.STORAGE_KEYS.settings, settings);
         this.audioManager.enabled = settings.soundEnabled;
+        this.updatePresetHighlight();
+    }
+
+    /* ---------- 主题系统 ---------- */
+
+    initThemeUI() {
+        const menu = this.elements.themeMenu;
+        const grid = this.elements.themeGrid;
+
+        if (menu) {
+            menu.innerHTML = CONFIG.THEMES.map(entry => this.themeOptionHTML(entry)).join('');
+            menu.addEventListener('click', (e) => {
+                const btn = e.target.closest('.theme-option');
+                if (!btn) return;
+                this.setTheme(btn.dataset.themeId);
+                this.closeThemeMenu();
+            });
+        }
+        if (grid) {
+            grid.innerHTML = CONFIG.THEMES.map(entry => this.themeOptionHTML(entry)).join('');
+            grid.addEventListener('click', (e) => {
+                const btn = e.target.closest('.theme-option');
+                if (!btn) return;
+                this.setTheme(btn.dataset.themeId);
+            });
+        }
+
+        // 跟随系统：系统配色变化时重新解析
+        if (this.themeQuery && typeof this.themeQuery.addEventListener === 'function') {
+            this.themeQuery.addEventListener('change', () => {
+                if (this.currentTheme === 'auto') {
+                    this.applyTheme('auto', { silent: true });
+                }
+            });
+        }
+
+        this.updateThemeSelections();
+    }
+
+    themeOptionHTML(entry) {
+        const stops = entry.id === 'auto'
+            ? `${entry.swatch[0]} 50%, ${entry.swatch[1]} 50%`
+            : entry.swatch.join(', ');
+        return `
+            <button type="button" class="theme-option" data-theme-id="${entry.id}" aria-pressed="false">
+                <span class="theme-swatch" style="background: linear-gradient(135deg, ${stops})"></span>
+                <span class="theme-option-label">${HTMLEscaper.escape(entry.label)}</span>
+                <svg class="theme-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>`;
+    }
+
+    applyTheme(pref, { silent = false } = {}) {
+        const entry = CONFIG.THEMES.find(t => t.id === pref);
+        if (!entry) return;
+
+        this.currentTheme = pref;
+        const resolved = pref === 'auto'
+            ? (this.themeQuery && this.themeQuery.matches ? 'daylight' : 'neon')
+            : pref;
+        const resolvedEntry = CONFIG.THEMES.find(t => t.id === resolved) || entry;
+
+        const root = document.documentElement;
+        if (!silent) {
+            root.classList.add('theme-transitioning');
+            clearTimeout(this.themeTransitionTimer);
+            this.themeTransitionTimer = setTimeout(() => root.classList.remove('theme-transitioning'), 400);
+        }
+        root.setAttribute('data-theme', resolved);
+
+        const meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', resolvedEntry.metaColor);
+
+        this.updateThemeSelections();
+    }
+
+    setTheme(pref) {
+        this.applyTheme(pref);
+        this.saveSettings();
+    }
+
+    updateThemeSelections() {
+        document.querySelectorAll('.theme-option').forEach(btn => {
+            const active = btn.dataset.themeId === this.currentTheme;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-pressed', String(active));
+        });
+    }
+
+    toggleThemeMenu() {
+        const menu = this.elements.themeMenu;
+        if (!menu) return;
+        if (menu.hidden) {
+            menu.hidden = false;
+            requestAnimationFrame(() => menu.classList.add('open'));
+            this.elements.themeBtn?.setAttribute('aria-expanded', 'true');
+        } else {
+            this.closeThemeMenu();
+        }
+    }
+
+    closeThemeMenu() {
+        const menu = this.elements.themeMenu;
+        if (!menu || menu.hidden) return;
+        menu.classList.remove('open');
+        this.elements.themeBtn?.setAttribute('aria-expanded', 'false');
+        setTimeout(() => { menu.hidden = true; }, 180);
+    }
+
+    cycleTheme() {
+        const ids = CONFIG.THEMES.map(t => t.id);
+        const index = ids.indexOf(this.currentTheme);
+        const next = ids[(index + 1) % ids.length];
+        this.setTheme(next);
+        const entry = CONFIG.THEMES.find(t => t.id === next);
+        Toast.show(`主题：${entry.label}`);
+    }
+
+    /* ---------- 选项卡 ---------- */
+
+    initTabs() {
+        this.tabBtns = document.querySelectorAll('.tab-btn');
+        this.tabPanels = document.querySelectorAll('.tab-panel');
+        this.tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => this.switchTab(btn.dataset.tab));
+        });
+    }
+
+    switchTab(name) {
+        this.tabBtns.forEach(btn => {
+            const active = btn.dataset.tab === name;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-selected', String(active));
+            btn.tabIndex = active ? 0 : -1;
+        });
+        this.tabPanels.forEach(panel => {
+            panel.hidden = panel.dataset.tabPanel !== name;
+        });
+    }
+
+    /* ---------- 键盘快捷键 ---------- */
+
+    bindKeyboardShortcuts() {
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+            const target = e.target;
+            const isFormField = target instanceof Element &&
+                target.matches('input, textarea, select, [contenteditable="true"]');
+            if (isFormField) return;
+            if (document.querySelector('.modal-overlay')) return;
+
+            if (e.code === 'Space') {
+                // 空格始终作为全局开始/暂停快捷键；按钮激活请使用 Enter
+                e.preventDefault();
+                if (this.isRunning) {
+                    this.pause();
+                } else {
+                    this.start();
+                }
+            } else if (e.key === 'r' || e.key === 'R') {
+                this.reset();
+            } else if (e.key === 't' || e.key === 'T') {
+                this.cycleTheme();
+            } else if (e.key === 'Escape') {
+                this.closeThemeMenu();
+            }
+        });
+    }
+
+    /* ---------- 预设高亮 ---------- */
+
+    updatePresetHighlight() {
+        if (!this.presetBtns || !this.presetBtns.length) return;
+        const current = this.getSettings();
+        this.presetBtns.forEach(btn => {
+            const preset = CONFIG.PRESETS[btn.dataset.preset];
+            const match = preset && ['repsPerSet', 'totalSets', 'contractTime', 'relaxTime', 'restTime']
+                .every(key => parseInt(preset[key], 10) === parseInt(current[key], 10));
+            btn.classList.toggle('active', !!match);
+            btn.setAttribute('aria-pressed', String(!!match));
+        });
     }
 
     loadReminderSettings() {
@@ -305,26 +512,35 @@ class KegelTrainer {
     }
 
     updateButtons() {
+        const startLabel = this.elements.startBtnLabel || this.elements.startBtn;
         if (this.isRunning) {
             this.elements.startBtn.disabled = true;
             this.elements.pauseBtn.disabled = false;
+            if (startLabel) startLabel.textContent = '进行中';
         } else if (this.isPaused) {
             this.elements.startBtn.disabled = false;
-            this.elements.startBtn.textContent = '继续';
+            if (startLabel) startLabel.textContent = '继续';
             this.elements.pauseBtn.disabled = true;
         } else {
             this.elements.startBtn.disabled = false;
-            this.elements.startBtn.textContent = '开始训练';
+            if (startLabel) startLabel.textContent = '开始训练';
             this.elements.pauseBtn.disabled = true;
         }
     }
 
     updateProgress() {
+        const ring = this.elements.progressRing;
+        if (!ring) return;
+
         const settings = this.getSettings();
         const totalReps = settings.totalSets * settings.repsPerSet;
         const completedReps = (this.currentSet - 1) * settings.repsPerSet + (this.currentRep - 1);
         const progress = Math.min((completedReps / totalReps) * 100, 100);
-        this.elements.progressFill.style.width = `${progress}%`;
+
+        const radius = parseFloat(ring.getAttribute('r')) || 130;
+        const circumference = 2 * Math.PI * radius;
+        ring.style.strokeDasharray = `${circumference}`;
+        ring.style.strokeDashoffset = `${circumference * (1 - progress / 100)}`;
     }
 
     handleSyncToggle(enabled) {
@@ -702,6 +918,12 @@ class KegelTrainer {
     validateSettings(settings) {
         const validated = {};
         for (const [key, value] of Object.entries(settings)) {
+            if (key === 'theme') {
+                validated[key] = CONFIG.THEMES.some(t => t.id === value)
+                    ? value
+                    : CONFIG.DEFAULT_SETTINGS.theme;
+                continue;
+            }
             const range = CONFIG.VALIDATION[key];
             if (range) {
                 const num = parseInt(value, 10);

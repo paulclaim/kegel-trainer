@@ -184,18 +184,7 @@ class Modal {
 }
 
 class Toast {
-    static ensureStyles() {
-        if (document.getElementById('toast-styles')) return;
-
-        const style = document.createElement('style');
-        style.id = 'toast-styles';
-        style.textContent = `
-            .toast-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 1100; display: flex; flex-direction: column; gap: 10px; align-items: center; }
-            .toast-message { background: rgba(0, 0, 0, 0.8); color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 14px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); max-width: 260px; text-align: center; }
-        `;
-        document.head.appendChild(style);
-    }
-
+    // 样式定义在 style.css 中（.toast-container / .toast-message，随主题变化）
     static ensureContainer() {
         let container = document.querySelector('.toast-container');
         if (!container) {
@@ -207,7 +196,6 @@ class Toast {
     }
 
     static show(message, duration) {
-        this.ensureStyles();
         const container = this.ensureContainer();
 
         const toast = document.createElement('div');

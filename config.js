@@ -6,8 +6,22 @@ const CONFIG = {
         totalSets: 3,
         contractTime: 5,
         relaxTime: 5,
-        restTime: 10
+        restTime: 10,
+        theme: 'neon'
     },
+
+    // 界面主题（swatch 用于选项预览色板，metaColor 用于浏览器主题色）
+    THEMES: [
+        { id: 'neon',     label: '暗夜霓虹', dark: true,  metaColor: '#0f172a', swatch: ['#10b981', '#06b6d4', '#6366f1'] },
+        { id: 'daylight', label: '清新日光', dark: false, metaColor: '#eef2f7', swatch: ['#059669', '#0ea5e9', '#6366f1'] },
+        { id: 'sakura',   label: '樱花粉',   dark: false, metaColor: '#fdf2f8', swatch: ['#e11d48', '#f472b6', '#a855f7'] },
+        { id: 'ocean',    label: '海洋蓝',   dark: true,  metaColor: '#082f49', swatch: ['#2dd4bf', '#22d3ee', '#3b82f6'] },
+        { id: 'mono',     label: '极简黑白', dark: true,  metaColor: '#0a0a0a', swatch: ['#fafafa', '#a3a3a3', '#525252'] },
+        { id: 'auto',     label: '跟随系统', dark: null,  metaColor: '#0f172a', swatch: ['#0f172a', '#f8fafc'] }
+    ],
+
+    // 默认主题
+    DEFAULT_THEME: 'neon',
 
     // 训练预设
     PRESETS: {

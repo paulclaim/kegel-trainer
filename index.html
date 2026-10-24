@@ -5,120 +5,231 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>凯格尔运动训练器</title>
+    <meta name="theme-color" content="#0f172a">
+    <script>
+        // 预渲染应用已保存的主题，防止闪烁（主题 ID 需与 CONFIG.THEMES 保持一致）
+        (function () {
+            var valid = ['neon', 'daylight', 'sakura', 'ocean', 'mono'];
+            var pref = 'neon';
+            try {
+                var raw = localStorage.getItem('kegelSettings');
+                if (raw) {
+                    var saved = JSON.parse(raw);
+                    if (saved && saved.theme) pref = saved.theme;
+                }
+            } catch (e) { /* 存储损坏时使用默认主题 */ }
+            var resolved = pref;
+            if (pref === 'auto') {
+                resolved = window.matchMedia &&
+                    window.matchMedia('(prefers-color-scheme: light)').matches
+                    ? 'daylight' : 'neon';
+            }
+            if (valid.indexOf(resolved) === -1) resolved = 'neon';
+            document.documentElement.setAttribute('data-theme', resolved);
+        })();
+    </script>
     <link rel="stylesheet" href="style.css">
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' style='stop-color:%2310b981'/><stop offset='100%25' style='stop-color:%236366f1'/></linearGradient></defs><circle cx='50' cy='50' r='45' fill='url(%23g)'/><circle cx='50' cy='50' r='25' fill='white' opacity='0.9'/></svg>">
 </head>
 
 <body>
-    <div class="container">
-        <header>
-            <h1>凯格尔运动训练</h1>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill"></div>
+    <a class="skip-link" href="#controls">跳到训练控制</a>
+
+    <!-- 无障碍: live region 用于状态播报 -->
+    <div id="statusAnnouncer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
+    <header class="app-header">
+        <div class="app-header-inner">
+            <div class="brand">
+                <svg class="brand-logo" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+                    <defs>
+                        <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color: var(--primary);" />
+                            <stop offset="100%" style="stop-color: var(--secondary);" />
+                        </linearGradient>
+                    </defs>
+                    <circle cx="50" cy="50" r="44" fill="url(#logoGrad)" />
+                    <circle cx="50" cy="50" r="24" fill="var(--surface-solid, #fff)" opacity="0.92" />
+                </svg>
+                <h1>凯格尔训练器</h1>
             </div>
-        </header>
-
-        <main>
-            <!-- 无障碍: 添加 live region 用于状态播报 -->
-            <div id="statusAnnouncer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
-
-            <div class="layout-grid">
-                <div class="layout-main">
-                    <div class="exercise-area" role="region" aria-label="训练区域">
-                        <div class="animation-circle" id="animationCircle" role="img" aria-label="训练动画">
-                            <div class="inner-circle"></div>
-                        </div>
-
-                        <div class="exercise-info">
-                            <div class="action-text" id="actionText" aria-live="assertive">准备开始</div>
-                            <div class="current-set">第 <span id="currentSet">1</span> 组</div>
-                            <div class="current-rep">第 <span id="currentRep">1</span> 次</div>
-                            <div class="timer" id="timer" aria-live="polite">准备开始</div>
-                        </div>
-                    </div>
-
-                    <div class="controls" role="group" aria-label="训练控制">
-                        <button id="startBtn" class="btn-primary" aria-label="开始训练">开始训练</button>
-                        <button id="pauseBtn" class="btn-secondary" disabled aria-label="暂停训练">暂停</button>
-                        <button id="resetBtn" class="btn-secondary" aria-label="重置训练">重置</button>
-                        <button id="exportBtn" class="btn-secondary" aria-label="导出数据">导出</button>
-                        <button id="importBtn" class="btn-secondary" aria-label="导入数据">导入</button>
-                    </div>
+            <div class="header-actions">
+                <span class="status-badge" id="syncStatus" role="status" title="云端同步状态">检测中...</span>
+                <div class="theme-menu-wrap">
+                    <button id="themeBtn" class="icon-btn" type="button" aria-haspopup="menu" aria-expanded="false"
+                        aria-controls="themeMenu" aria-label="切换主题" title="切换主题 (T)">
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+                            <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" />
+                        </svg>
+                    </button>
+                    <div id="themeMenu" class="theme-menu" role="menu" aria-label="主题菜单" hidden></div>
                 </div>
+            </div>
+        </div>
+    </header>
 
-                <div class="layout-sidebar">
-                    <div class="settings">
-                        <h3>训练设置</h3>
+    <main class="app-main">
+        <section class="stage" role="region" aria-label="训练区域">
+            <div class="ring-wrap">
+                <svg class="progress-ring" viewBox="0 0 280 280" aria-hidden="true" focusable="false">
+                    <defs>
+                        <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color: var(--primary);" />
+                            <stop offset="100%" style="stop-color: var(--secondary);" />
+                        </linearGradient>
+                    </defs>
+                    <circle class="ring-track" cx="140" cy="140" r="130" />
+                    <circle class="ring-fill" id="progressRing" cx="140" cy="140" r="130" />
+                </svg>
+                <div class="animation-circle" id="animationCircle" role="img" aria-label="训练动画">
+                    <div class="inner-circle"></div>
+                </div>
+            </div>
 
-                        <div class="preset-buttons">
-                            <button class="preset-btn" data-preset="beginner">初级</button>
-                            <button class="preset-btn" data-preset="intermediate">中级</button>
-                            <button class="preset-btn" data-preset="advanced">高级</button>
-                        </div>
+            <div class="exercise-info">
+                <div class="action-text" id="actionText" aria-live="assertive">准备开始</div>
+                <div class="phase-meta">
+                    <span class="current-set">第 <span id="currentSet">1</span> 组</span>
+                    <span class="phase-sep" aria-hidden="true">·</span>
+                    <span class="current-rep">第 <span id="currentRep">1</span> 次</span>
+                </div>
+                <div class="timer" id="timer" aria-live="polite">准备开始</div>
+            </div>
+        </section>
 
-                        <div class="setting-item">
-                            <label>每组次数：</label>
-                            <input type="number" id="repsPerSet" value="10" min="5" max="20">
-                        </div>
-                        <div class="setting-item">
-                            <label>总组数：</label>
-                            <input type="number" id="totalSets" value="3" min="1" max="5">
-                        </div>
-                        <div class="setting-item">
-                            <label>收缩时间（秒）：</label>
-                            <input type="number" id="contractTime" value="5" min="3" max="10">
-                        </div>
-                        <div class="setting-item">
-                            <label>放松时间（秒）：</label>
-                            <input type="number" id="relaxTime" value="5" min="3" max="10">
-                        </div>
+        <section class="controls" role="group" aria-label="训练控制" id="controls">
+            <button id="startBtn" class="btn btn-primary" aria-label="开始训练">
+                <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M7 4.5v15l13-7.5z" fill="currentColor" />
+                </svg>
+                <span class="btn-label" id="startBtnLabel">开始训练</span>
+            </button>
+            <button id="pauseBtn" class="btn btn-secondary" disabled aria-label="暂停训练">
+                <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M9 5v14M15 5v14" fill="none" stroke="currentColor" stroke-width="2.5"
+                        stroke-linecap="round" />
+                </svg>
+                <span class="btn-label">暂停</span>
+            </button>
+            <button id="resetBtn" class="btn btn-secondary" aria-label="重置训练">
+                <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="1 4 1 10 7 10" />
+                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                </svg>
+                <span class="btn-label">重置</span>
+            </button>
+            <button id="exportBtn" class="btn btn-secondary" aria-label="导出数据">
+                <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                <span class="btn-label">导出</span>
+            </button>
+            <button id="importBtn" class="btn btn-secondary" aria-label="导入数据">
+                <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 8 12 3 17 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                <span class="btn-label">导入</span>
+            </button>
+        </section>
 
-                        <div class="setting-item">
-                            <label>音效提示：</label>
-                            <input type="checkbox" id="soundToggle" checked>
-                        </div>
+        <aside class="panel" aria-label="训练设置与统计">
+            <div class="panel-tabs" role="tablist" aria-label="侧栏面板">
+                <button class="tab-btn active" id="tabTraining" role="tab" type="button" data-tab="training"
+                    aria-selected="true" aria-controls="tabPanelTraining">训练</button>
+                <button class="tab-btn" id="tabStats" role="tab" type="button" data-tab="stats"
+                    aria-selected="false" aria-controls="tabPanelStats" tabindex="-1">统计</button>
+                <button class="tab-btn" id="tabPrefs" role="tab" type="button" data-tab="prefs"
+                    aria-selected="false" aria-controls="tabPanelPrefs" tabindex="-1">偏好</button>
+            </div>
 
-                        <div class="setting-item">
-                            <label>云端同步：</label>
-                            <div class="setting-inline">
-                                <input type="checkbox" id="syncToggle" checked>
-                                <span class="status-badge" id="syncStatus">检测中...</span>
-                            </div>
-                        </div>
+            <div class="panel-body">
+                <section class="tab-panel" id="tabPanelTraining" role="tabpanel" aria-labelledby="tabTraining"
+                    data-tab-panel="training">
+                    <h3 class="panel-title">快速开始</h3>
+                    <div class="preset-buttons">
+                        <button class="preset-btn" data-preset="beginner" type="button">初级</button>
+                        <button class="preset-btn" data-preset="intermediate" type="button">中级</button>
+                        <button class="preset-btn" data-preset="advanced" type="button">高级</button>
+                    </div>
 
-                        <div class="setting-item">
-                            <label>每日提醒：</label>
+                    <h3 class="panel-title">训练参数</h3>
+                    <div class="setting-item">
+                        <label for="repsPerSet">每组次数</label>
+                        <input type="number" id="repsPerSet" value="10" min="5" max="20">
+                    </div>
+                    <div class="setting-item">
+                        <label for="totalSets">总组数</label>
+                        <input type="number" id="totalSets" value="3" min="1" max="5">
+                    </div>
+                    <div class="setting-item">
+                        <label for="contractTime">收缩时间（秒）</label>
+                        <input type="number" id="contractTime" value="5" min="3" max="10">
+                    </div>
+                    <div class="setting-item">
+                        <label for="relaxTime">放松时间（秒）</label>
+                        <input type="number" id="relaxTime" value="5" min="3" max="10">
+                    </div>
+                </section>
+
+                <section class="tab-panel" id="tabPanelStats" role="tabpanel" aria-labelledby="tabStats"
+                    data-tab-panel="stats" hidden>
+                    <h3 class="panel-title">训练统计</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="totalDays">0</div>
+                            <div class="stat-label">训练天数</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="totalSessions">0</div>
+                            <div class="stat-label">总次数</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="streak">0</div>
+                            <div class="stat-label">连续天数</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="totalTime">0</div>
+                            <div class="stat-label">总时长(分)</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="tab-panel" id="tabPanelPrefs" role="tabpanel" aria-labelledby="tabPrefs"
+                    data-tab-panel="prefs" hidden>
+                    <h3 class="panel-title">界面主题</h3>
+                    <div class="theme-grid" id="themeGrid" role="group" aria-label="选择主题"></div>
+
+                    <h3 class="panel-title">通用偏好</h3>
+                    <div class="setting-item">
+                        <label for="soundToggle">音效提示</label>
+                        <input type="checkbox" id="soundToggle" checked>
+                    </div>
+                    <div class="setting-item">
+                        <label for="syncToggle">云端同步</label>
+                        <div class="setting-inline">
+                            <input type="checkbox" id="syncToggle" checked>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <label for="reminderToggle">每日提醒</label>
+                        <div class="setting-inline">
                             <input type="checkbox" id="reminderToggle">
-                            <input type="time" id="reminderTime" value="09:00">
+                            <input type="time" id="reminderTime" value="09:00" aria-label="提醒时间">
                         </div>
                     </div>
-
-                    <div class="stats">
-                        <h3>训练统计</h3>
-                        <div class="stats-grid">
-                            <div class="stat-item">
-                                <div class="stat-value" id="totalDays">0</div>
-                                <div class="stat-label">训练天数</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value" id="totalSessions">0</div>
-                                <div class="stat-label">总次数</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value" id="streak">0</div>
-                                <div class="stat-label">连续天数</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value" id="totalTime">0</div>
-                                <div class="stat-label">总时长(分)</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                </section>
             </div>
-        </main>
-    </div>
+        </aside>
+    </main>
 
     <script src="config.js"></script>
     <script src="utils.js"></script>
