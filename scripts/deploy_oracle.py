@@ -21,7 +21,7 @@ HEALTH_URL = 'http://127.0.0.1:3010/health'
 APP_USER = 'ubuntu'
 PUBLIC_PATTERNS = ('*.html', '*.css', '*.js')
 EXCLUDES = [
-    '/.git/', '/.github/', '/.spec-workflow/', '/.zcode/',
+    '/.git/', '/.github/', '/.spec-workflow/', '/.zcode/', '/.kegel-trainer-root',
     '/public/', '/api/.env', '/api/node_modules/', '/node_modules/',
     '__pycache__/', '*.pyc', '.DS_Store',
 ]
