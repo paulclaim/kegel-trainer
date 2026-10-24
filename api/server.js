@@ -8,8 +8,14 @@ const routes = require('./routes');
 
 const app = express();
 
-// 静态文件服务（前端页面）
-app.use(express.static(path.join(__dirname, '..')));
+// 静态文件服务（前端页面）：HTML/CSS/JS 每次回源校验，避免 CDN 与浏览器缓存新旧版本混用
+app.use(express.static(path.join(__dirname, '..'), {
+  setHeaders(res, filePath) {
+    if (/\.(html|css|js)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  }
+}));
 const PORT = process.env.PORT || 3000;
 
 // 中间件
