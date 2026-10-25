@@ -15,6 +15,20 @@ class HTMLEscaper {
     }
 }
 
+// UUID 生成（优先使用平台加密实现，失败时降级为随机实现）
+class UUID {
+    static generate() {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            return crypto.randomUUID();
+        }
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, char => {
+            const random = Math.random() * 16 | 0;
+            const value = char === 'x' ? random : (random & 0x3 | 0x8);
+            return value.toString(16);
+        });
+    }
+}
+
 // 工具函数模块
 class StorageManager {
     static get(key, defaultValue = null) {

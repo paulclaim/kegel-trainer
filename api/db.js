@@ -13,7 +13,9 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   enableKeepAlive: true,
-  keepAliveInitialDelay: 0
+  keepAliveInitialDelay: 0,
+  // DATE 以 'YYYY-MM-DD' 字符串返回，避免时区换算影响前端合并键
+  dateStrings: ['DATE']
 });
 
 // 测试数据库连接

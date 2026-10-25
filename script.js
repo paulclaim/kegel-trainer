@@ -632,28 +632,17 @@ class KegelTrainer {
     }
 
     async updateStats() {
-        // 尝试从云端加载统计数据
-        const cloudStats = await this.dataSyncManager.loadStats();
+        // 统一从合并后的记录（本地 ∪ 云端）计算，本地与云端展示不再出现口径分叉
+        const records = await this.dataSyncManager.getRecords();
+        const uniqueDays = [...new Set(records.map(r => r.date))];
 
-        if (cloudStats) {
-            // 使用云端数据
-            this.elements.totalDays.textContent = cloudStats.totalDays;
-            this.elements.totalSessions.textContent = cloudStats.totalSessions;
-            this.elements.totalTime.textContent = cloudStats.totalTime;
-            this.elements.streak.textContent = cloudStats.streak;
-        } else {
-            // 降级到本地计算
-            const records = StorageManager.get(CONFIG.STORAGE_KEYS.records, []);
-            const uniqueDays = [...new Set(records.map(r => r.date))];
+        this.elements.totalDays.textContent = uniqueDays.length;
+        this.elements.totalSessions.textContent = records.length;
 
-            this.elements.totalDays.textContent = uniqueDays.length;
-            this.elements.totalSessions.textContent = records.length;
+        const totalTime = records.reduce((sum, r) => sum + Number(r.duration || 0), 0);
+        this.elements.totalTime.textContent = Math.round(totalTime);
 
-            const totalTime = records.reduce((sum, r) => sum + r.duration, 0);
-            this.elements.totalTime.textContent = Math.round(totalTime);
-
-            this.elements.streak.textContent = this.calculateStreak(uniqueDays);
-        }
+        this.elements.streak.textContent = this.calculateStreak(uniqueDays);
     }
 
     calculateStreak(days) {
@@ -733,13 +722,15 @@ class KegelTrainer {
                     return;
                 }
 
-                const result = await Modal.show('导入数据', '确定要导入数据吗？这将覆盖现有数据。', [
+                const result = await Modal.show('导入数据', '确定要导入数据吗？将与现有记录合并去重。', [
                     { text: '确定', primary: true },
                     { text: '取消', primary: false }
                 ]);
 
                 if (result === 0) {
-                    if (data.records) StorageManager.set(CONFIG.STORAGE_KEYS.records, data.records);
+                    if (data.records) {
+                        await this.dataSyncManager.importRecords(data.records);
+                    }
                     if (data.settings) {
                         const validatedSettings = this.validateSettings(data.settings);
                         StorageManager.set(CONFIG.STORAGE_KEYS.settings, validatedSettings);

@@ -47,6 +47,10 @@ class APIClient {
                     ...(options.headers || {})
                 }
             };
+            // 超时中断，避免弱网下统计渲染被长时间挂起
+            if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+                config.signal = AbortSignal.timeout(10000);
+            }
 
             const response = await fetch(url, config);
             const data = await response.json();
@@ -113,7 +117,11 @@ class APIClient {
                 ? new URL(this.baseURL)
                 : new URL(window.location.origin + this.baseURL);
             const healthUrl = new URL('/health', base);
-            const response = await fetch(healthUrl.toString());
+            const options = {};
+            if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+                options.signal = AbortSignal.timeout(5000);
+            }
+            const response = await fetch(healthUrl.toString(), options);
             return response.ok;
         } catch (error) {
             return false;
@@ -136,7 +144,20 @@ class DataSyncManager {
             timestamp: 0
         };
 
-        this.checkConnection();
+        // 网络恢复或页面回到前台时，补传待同步记录
+        window.addEventListener('online', () => {
+            this.forceCheckConnection().then(online => {
+                if (online) return this.flushPendingSyncs();
+            });
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) this.flushPendingSyncs();
+        });
+
+        // 启动顺序：先与云端合并（完成旧数据迁移配对），再补传待同步记录
+        this.getRecords()
+            .then(() => this.flushPendingSyncs())
+            .catch(error => console.warn('启动同步失败:', error.message));
     }
 
     // 检查连接状态（带缓存）
@@ -154,7 +175,6 @@ class DataSyncManager {
             return this.isOnline;
         }
 
-        const wasOnline = this.isOnline;
         this.isOnline = await this.apiClient.checkConnection();
 
         // 更新缓存
@@ -180,117 +200,226 @@ class DataSyncManager {
         return this.checkConnection();
     }
 
-    // 保存训练记录（支持离线）
+    // 保存训练记录：先落本地（未同步状态），再尝试立即上云，失败则留在待同步队列
     async saveSession(sessionData) {
-        // 先保存到本地
-        let records = StorageManager.get(CONFIG.STORAGE_KEYS.records, []);
-        records.push(sessionData);
+        const record = {
+            ...sessionData,
+            id: sessionData.id || UUID.generate(),
+            synced: false
+        };
+
+        const records = StorageManager.get(CONFIG.STORAGE_KEYS.records, []);
+        records.push(record);
         StorageManager.set(CONFIG.STORAGE_KEYS.records, records);
 
-        // 如果在线且启用同步，同步到服务器
-        if (this.syncEnabled && await this.checkConnection()) {
+        await this.flushPendingSyncs();
+        return record;
+    }
+
+    // 补传所有未同步记录（成功一条标记一条，失败即停以保证顺序）。
+    // 跳过还没有 id 的旧记录：它们需要先经 getRecords 与云端配对迁移，避免裸传产生重复
+    async flushPendingSyncs() {
+        if (!this.syncEnabled) return 0;
+        const pending = StorageManager.get(CONFIG.STORAGE_KEYS.records, [])
+            .filter(record => !record.synced && record.id);
+        if (pending.length === 0) return 0;
+
+        if (!await this.checkConnection()) return 0;
+
+        let syncedCount = 0;
+        for (const record of pending) {
             try {
-                await this.apiClient.saveSession(sessionData);
-                console.log('✓ 训练记录已同步到云端');
+                await this.apiClient.saveSession(this.toCloudRecord(record));
+                this.markRecordSynced(record.id);
+                syncedCount++;
             } catch (error) {
-                console.warn('云端同步失败，数据已保存到本地:', error.message);
+                console.warn('云端同步失败，记录已保留在待同步队列:', error.message);
                 if (!this.syncErrorNotified) {
-                    Toast.show('云端同步失败，已保存到本地');
+                    Toast.show('云端同步失败，将在联网后自动重试');
                     this.syncErrorNotified = true;
                 }
+                break;
             }
         }
+        return syncedCount;
     }
 
-    // 加载训练记录（优先从云端）
-    async loadSessions() {
+    // 获取本地与云端合并后的记录（统计与历史展示的唯一数据源）。
+    // 并发调用共享同一次请求，避免重复拉取与交叉写入
+    getRecords() {
+        if (!this._loadingRecords) {
+            this._loadingRecords = this._loadRecords()
+                .finally(() => { this._loadingRecords = null; });
+        }
+        return this._loadingRecords;
+    }
+
+    async _loadRecords() {
+        let cloudRows = [];
+        let cloudLoaded = false;
         if (this.syncEnabled && await this.checkConnection()) {
             try {
-                const response = await this.apiClient.getSessions();
-                if (response.success && response.data) {
-                    // 转换为本地格式
-                    const records = response.data.map(session => ({
-                        date: session.date,
-                        sets: session.sets,
-                        reps: session.reps,
-                        duration: session.duration
-                    }));
-
-                    // 更新本地缓存
-                    StorageManager.set(CONFIG.STORAGE_KEYS.records, records);
-                    console.log('✓ 已从云端加载训练记录');
-                    return records;
+                const response = await this.apiClient.getSessions(500);
+                if (response.success && Array.isArray(response.data)) {
+                    cloudRows = response.data;
+                    cloudLoaded = true;
                 }
             } catch (error) {
-                console.warn('从云端加载失败，使用本地数据:', error.message);
+                console.warn('从云端加载记录失败，使用本地数据:', error.message);
             }
         }
 
-        // 降级到本地存储
-        return StorageManager.get(CONFIG.STORAGE_KEYS.records, []);
-    }
-
-    // 加载统计数据（优先从云端）
-    async loadStats() {
-        if (this.syncEnabled && await this.checkConnection()) {
-            try {
-                const response = await this.apiClient.getStats();
-                if (response.success && response.data) {
-                    console.log('✓ 已从云端加载统计数据');
-                    return response.data;
-                }
-            } catch (error) {
-                console.warn('从云端加载统计失败，使用本地计算:', error.message);
-            }
-        }
-
-        // 降级到本地计算
-        return null;
-    }
-
-    // 同步本地数据到云端
-    async syncToCloud() {
-        if (!await this.checkConnection()) {
-            throw new Error('无法连接到服务器');
-        }
-
+        // fetch 之后再读本地存储：读取、合并、写回全部同步执行，期间不会有新的本地写入被覆盖
         const localRecords = StorageManager.get(CONFIG.STORAGE_KEYS.records, []);
-        let successCount = 0;
-        let failCount = 0;
+        const merged = cloudLoaded
+            ? this.mergeRecords(localRecords, cloudRows)
+            : localRecords;
 
+        StorageManager.set(CONFIG.STORAGE_KEYS.records, merged);
+        return merged;
+    }
+
+    // 合并规则：
+    // 1. 有 id（client UUID）的记录按 id 幂等合并，本地记录保留未同步标记；
+    // 2. 升级前的旧数据（本地无 id / 云端无 client_id）按“日期+参数+时长”多重集配对，
+    //    仅在首次迁移时执行，避免同日多次训练被误合并或旧云端行被重复导入。
+    mergeRecords(localRecords, cloudRows) {
+        const legacyMigrated = StorageManager.get(CONFIG.STORAGE_KEYS.legacyMigrated, false);
+
+        const localById = new Map();
+        const legacyLocal = [];
         for (const record of localRecords) {
-            try {
-                await this.apiClient.saveSession(record);
-                successCount++;
-            } catch (error) {
-                failCount++;
-                console.error('同步记录失败:', error);
+            if (record.id) localById.set(record.id, { ...record });
+            else legacyLocal.push({ ...record });
+        }
+
+        const cloudById = new Map();
+        const legacyCloudByKey = new Map();
+        for (const row of cloudRows) {
+            if (row.client_id) {
+                cloudById.set(row.client_id, row);
+            } else if (!legacyMigrated) {
+                const key = this.legacyKey(row);
+                if (!legacyCloudByKey.has(key)) legacyCloudByKey.set(key, []);
+                legacyCloudByKey.get(key).push(row);
             }
         }
 
-        return { successCount, failCount, total: localRecords.length };
+        // 旧本地记录：能配上旧云端行的视为已同步，配不上的保持未同步等待补传
+        for (const record of legacyLocal) {
+            const pool = legacyCloudByKey.get(this.legacyKey(record));
+            if (pool && pool.length > 0) {
+                pool.pop();
+                record.id = UUID.generate();
+                record.synced = true;
+            } else {
+                record.id = UUID.generate();
+                record.synced = false;
+            }
+            localById.set(record.id, record);
+        }
+
+        // 仅存在于云端的记录导入本地
+        for (const [id, row] of cloudById) {
+            if (!localById.has(id)) {
+                localById.set(id, this.recordFromCloudRow(row));
+            }
+        }
+
+        if (!legacyMigrated) {
+            for (const pool of legacyCloudByKey.values()) {
+                for (const row of pool) {
+                    const record = this.recordFromCloudRow(row);
+                    record.id = UUID.generate(); // 云端旧行没有 client_id，导入后视为本地已同步记录
+                    localById.set(record.id, record);
+                }
+            }
+            StorageManager.set(CONFIG.STORAGE_KEYS.legacyMigrated, true);
+        }
+
+        const merged = [...localById.values()].sort((a, b) =>
+            a.date < b.date ? -1 : a.date > b.date ? 1 : 0
+        );
+        return merged;
     }
 
-    // 从云端拉取数据
-    async pullFromCloud() {
-        if (!await this.checkConnection()) {
-            throw new Error('无法连接到服务器');
+    legacyKey(record) {
+        return `${this.normalizeDate(record.date)}|${Number(record.sets)}|${Number(record.reps)}|${Number(record.duration)}`;
+    }
+
+    recordFromCloudRow(row) {
+        return {
+            id: row.client_id,
+            date: this.normalizeDate(row.date),
+            sets: Number(row.sets),
+            reps: Number(row.reps),
+            duration: Number(row.duration),
+            contract_time: Number(row.contract_time),
+            relax_time: Number(row.relax_time),
+            synced: true
+        };
+    }
+
+    normalizeDate(date) {
+        if (typeof date === 'string') return date.slice(0, 10);
+        return DateUtils.formatDate(new Date(date));
+    }
+
+    toCloudRecord(record) {
+        return {
+            client_id: record.id,
+            date: record.date,
+            sets: record.sets,
+            reps: record.reps,
+            duration: record.duration,
+            contract_time: record.contract_time,
+            relax_time: record.relax_time
+        };
+    }
+
+    // 导入外部记录：与现有记录（含云端）按内容多重集去重后并入，避免同步后产生重复
+    async importRecords(importedRecords) {
+        if (!Array.isArray(importedRecords)) return 0;
+
+        const existing = await this.getRecords();
+        const available = new Map();
+        for (const record of existing) {
+            const key = this.legacyKey(record);
+            if (!available.has(key)) available.set(key, []);
+            available.get(key).push(record);
         }
 
-        const response = await this.apiClient.getSessions();
-        if (response.success && response.data) {
-            const records = response.data.map(session => ({
-                date: session.date,
-                sets: session.sets,
-                reps: session.reps,
-                duration: session.duration
-            }));
+        let added = 0;
+        for (const raw of importedRecords) {
+            const record = {
+                date: this.normalizeDate(raw.date),
+                sets: Number(raw.sets) || 0,
+                reps: Number(raw.reps) || 0,
+                duration: Number(raw.duration) || 0,
+                contract_time: Number(raw.contract_time) || 0,
+                relax_time: Number(raw.relax_time) || 0
+            };
+            const pool = available.get(this.legacyKey(record));
+            if (pool && pool.length > 0) {
+                pool.pop(); // 已存在同内容记录，跳过
+                continue;
+            }
+            existing.push({ ...record, id: UUID.generate(), synced: false });
+            added++;
+        }
 
+        StorageManager.set(CONFIG.STORAGE_KEYS.records, existing);
+        this.flushPendingSyncs();
+        return added;
+    }
+
+    markRecordSynced(recordId) {
+        const records = StorageManager.get(CONFIG.STORAGE_KEYS.records, []);
+        const target = records.find(record => record.id === recordId);
+        if (target) {
+            target.synced = true;
             StorageManager.set(CONFIG.STORAGE_KEYS.records, records);
-            return records.length;
         }
-
-        return 0;
     }
 
     // 切换同步状态
@@ -299,6 +428,7 @@ class DataSyncManager {
         StorageManager.set(CONFIG.STORAGE_KEYS.syncEnabled, enabled);
         // 重置连接缓存
         this.connectionCache = { status: null, timestamp: 0 };
+        if (enabled) this.flushPendingSyncs();
         return this.syncEnabled;
     }
 }

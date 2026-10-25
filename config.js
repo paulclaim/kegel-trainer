@@ -46,7 +46,8 @@ const CONFIG = {
         reminders: 'kegelReminders',
         progress: 'kegelProgress',
         syncEnabled: 'sync_enabled',
-        userId: 'kegel_user_id'
+        userId: 'kegel_user_id',
+        legacyMigrated: 'kegel_legacy_migrated'
     },
 
     // 时间常量（毫秒）
