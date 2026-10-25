@@ -30,6 +30,9 @@ jobs:
           for f in api/*.js; do node --check "$f"; done
           python3 -c 'import json;json.load(open("api/package.json"))'
 
+      - name: Unit tests
+        run: node --test
+
       - name: Check latest main commit
         id: latest
         env:

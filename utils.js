@@ -314,3 +314,8 @@ class DataExporter {
         }
     }
 }
+
+// 供 Node 单元测试加载（浏览器环境没有 module 对象，不影响页面）
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { HTMLEscaper, UUID, DateUtils, DataExporter };
+}

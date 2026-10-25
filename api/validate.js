@@ -5,9 +5,13 @@ const CLIENT_ID_RE = /^[A-Za-z0-9_-]{1,36}$/;
 
 function isValidDateString(value) {
   if (typeof value !== 'string' || !DATE_RE.test(value)) return false;
-  const date = new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return false;
-  const year = date.getUTCFullYear();
+  const [year, month, day] = value.split('-').map(Number);
+  // new Date 对溢出日期会自动进位（如 2026-02-30 → 3 月 2 日），
+  // 需要往返比对各字段才能识别
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return false;
+  }
   return year >= 2000 && year <= 2100;
 }
 
