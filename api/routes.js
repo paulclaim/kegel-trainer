@@ -19,7 +19,7 @@ router.get('/sessions', async (req, res) => {
     const offset = parseInt(req.query.offset) || 0;
 
     const [rows] = await pool.query(
-      `SELECT id, date, sets, reps, duration, contract_time, relax_time, created_at
+      `SELECT id, client_id, date, sets, reps, duration, contract_time, relax_time, created_at
        FROM kegel_sessions
        WHERE user_id = ?
        ORDER BY date DESC, created_at DESC
@@ -46,6 +46,7 @@ router.get('/sessions', async (req, res) => {
 router.post('/sessions', async (req, res) => {
   try {
     const { date, sets, reps, duration, contract_time, relax_time, user_id } = req.body;
+    const clientId = typeof req.body.client_id === 'string' ? req.body.client_id.slice(0, 36) : null;
 
     // 验证必填字段
     if (!date || !sets || !reps || !duration || !contract_time || !relax_time || !user_id) {
@@ -55,12 +56,15 @@ router.post('/sessions', async (req, res) => {
       });
     }
 
+    // 带 client_id 时按其幂等去重：重复提交不会产生新记录
     const [result] = await pool.query(
       `INSERT INTO kegel_sessions
-       (user_id, date, sets, reps, duration, contract_time, relax_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (user_id, client_id, date, sets, reps, duration, contract_time, relax_time)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ${clientId ? 'ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)' : ''}`,
       [
         user_id,
+        clientId,
         date,
         sets,
         reps,
@@ -74,6 +78,7 @@ router.post('/sessions', async (req, res) => {
       success: true,
       data: {
         id: result.insertId,
+        inserted: result.affectedRows === 1,
         message: '训练记录保存成功'
       }
     });
