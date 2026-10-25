@@ -19,10 +19,10 @@ app.use((req, res, next) => {
     next();
 });
 
-// 静态文件服务（前端页面）：HTML/CSS/JS 每次回源校验，避免 CDN 与浏览器缓存新旧版本混用
+// 静态文件服务（前端页面）：HTML/CSS/JS/manifest 每次回源校验，避免 CDN 与浏览器缓存新旧版本混用
 app.use(express.static(path.join(__dirname, '..'), {
   setHeaders(res, filePath) {
-    if (/\.(html|css|js)$/i.test(filePath)) {
+    if (/\.(html|css|js|webmanifest)$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'no-cache');
     }
   }

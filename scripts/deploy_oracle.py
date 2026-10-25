@@ -19,7 +19,7 @@ STATE = Path('/var/lib/kegel-trainer-deploy')
 SERVICE = 'kegel-trainer.service'
 HEALTH_URL = 'http://127.0.0.1:3010/health'
 APP_USER = 'ubuntu'
-PUBLIC_PATTERNS = ('*.html', '*.css', '*.js')
+PUBLIC_PATTERNS = ('*.html', '*.css', '*.js', 'manifest.webmanifest', 'icons/*.png')
 EXCLUDES = [
     '/.git/', '/.github/', '/.spec-workflow/', '/.zcode/', '/.kegel-trainer-root',
     '/public/', '/api/.env', '/api/node_modules/', '/node_modules/',

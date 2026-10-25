@@ -1,0 +1,36 @@
+{
+    "name": "凯格尔训练器",
+    "short_name": "凯格尔训练",
+    "description": "凯格尔运动训练器：自定义训练计划、音效振动提示、训练统计与云端同步",
+    "lang": "zh-CN",
+    "start_url": "./",
+    "scope": "./",
+    "display": "standalone",
+    "orientation": "portrait-primary",
+    "background_color": "#0f172a",
+    "theme_color": "#0f172a",
+    "icons": [
+        {
+            "src": "icons/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/icon-192-maskable.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/icon-512-maskable.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}
