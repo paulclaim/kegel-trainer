@@ -1,7 +1,6 @@
 // 凯格尔运动训练器 API 服务器
 const express = require('express');
 const cors = require('cors');
-const bodyParser = require('body-parser');
 const path = require('path');
 const { testConnection, initTables } = require('./db');
 const { securityHeaders, createRateLimiter } = require('./security');
@@ -40,8 +39,8 @@ const corsOrigins = (process.env.CORS_ORIGINS || '')
   .filter(Boolean);
 app.use(cors(corsOrigins.length > 0 ? { origin: corsOrigins } : { origin: false }));
 
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json({ limit: '32kb' }));
+app.use(express.urlencoded({ extended: true }));
 
 // 请求日志
 app.use((req, res, next) => {
