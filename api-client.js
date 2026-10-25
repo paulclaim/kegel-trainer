@@ -26,11 +26,11 @@ class APIClient {
         console.log('API Base URL:', this.baseURL);
     }
 
-    // 获取或生成用户 ID
+    // 获取或生成用户 ID（使用加密随机 UUID，降低被猜测冒用的可能）
     getUserId() {
         let userId = localStorage.getItem('kegel_user_id');
         if (!userId) {
-            userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            userId = 'user_' + UUID.generate();
             localStorage.setItem('kegel_user_id', userId);
         }
         return userId;

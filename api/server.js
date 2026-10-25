@@ -4,9 +4,20 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const path = require('path');
 const { testConnection, initTables } = require('./db');
+const { securityHeaders, createRateLimiter } = require('./security');
 const routes = require('./routes');
 
 const app = express();
+
+// 仅公开前端静态资源：仓库内的 API 源码、文档等不允许被直接访问
+const PUBLIC_PATHS = /^\/(index\.html|data-recovery\.html|style\.css|script\.js|utils\.js|config\.js|api-client\.js|manifest\.webmanifest|sw\.js|icons\/[A-Za-z0-9._-]+\.(png|svg))?$/;
+app.use((req, res, next) => {
+    if (req.path === '/health' || req.path.startsWith('/api')) return next();
+    if (!PUBLIC_PATHS.test(req.path)) {
+        return res.status(404).json({ success: false, error: 'Not Found' });
+    }
+    next();
+});
 
 // 静态文件服务（前端页面）：HTML/CSS/JS 每次回源校验，避免 CDN 与浏览器缓存新旧版本混用
 app.use(express.static(path.join(__dirname, '..'), {
@@ -19,7 +30,16 @@ app.use(express.static(path.join(__dirname, '..'), {
 const PORT = process.env.PORT || 3000;
 
 // 中间件
-app.use(cors());
+app.use(securityHeaders);
+app.use(createRateLimiter({ windowMs: 60000, max: 120 }));
+
+// 跨域白名单：默认仅同源；静态站与 API 分离部署时通过 CORS_ORIGINS 配置（逗号分隔）
+const corsOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+app.use(cors(corsOrigins.length > 0 ? { origin: corsOrigins } : { origin: false }));
+
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -72,8 +92,7 @@ app.use((err, req, res, next) => {
   console.error('服务器错误:', err);
   res.status(500).json({
     success: false,
-    error: '服务器内部错误',
-    message: err.message
+    error: '服务器内部错误'
   });
 });
 

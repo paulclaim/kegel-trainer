@@ -2,21 +2,25 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('./db');
+const {
+  validateUserId,
+  sanitizePagination,
+  validateSessionPayload
+} = require('./validate');
 
 // 获取训练记录
 router.get('/sessions', async (req, res) => {
   try {
     const userId = req.query.user_id;
 
-    if (!userId) {
+    if (!validateUserId(userId)) {
       return res.status(400).json({
         success: false,
-        error: '缺少 user_id 参数'
+        error: '缺少 user_id 参数或格式无效'
       });
     }
 
-    const limit = parseInt(req.query.limit) || 100;
-    const offset = parseInt(req.query.offset) || 0;
+    const { limit, offset } = sanitizePagination(req.query);
 
     const [rows] = await pool.query(
       `SELECT id, client_id, date, sets, reps, duration, contract_time, relax_time, created_at
@@ -36,8 +40,7 @@ router.get('/sessions', async (req, res) => {
     console.error('获取训练记录失败:', error);
     res.status(500).json({
       success: false,
-      error: '获取训练记录失败',
-      message: error.message
+      error: '获取训练记录失败'
     });
   }
 });
@@ -45,16 +48,14 @@ router.get('/sessions', async (req, res) => {
 // 保存训练记录
 router.post('/sessions', async (req, res) => {
   try {
-    const { date, sets, reps, duration, contract_time, relax_time, user_id } = req.body;
-    const clientId = typeof req.body.client_id === 'string' ? req.body.client_id.slice(0, 36) : null;
-
-    // 验证必填字段
-    if (!date || !sets || !reps || !duration || !contract_time || !relax_time || !user_id) {
+    const { valid, errors, values } = validateSessionPayload(req.body);
+    if (!valid) {
       return res.status(400).json({
         success: false,
-        error: '缺少必填字段'
+        error: errors.join('；')
       });
     }
+    const clientId = values.client_id || null;
 
     // 带 client_id 时按其幂等去重：重复提交不会产生新记录
     const [result] = await pool.query(
@@ -63,14 +64,14 @@ router.post('/sessions', async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ${clientId ? 'ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)' : ''}`,
       [
-        user_id,
+        values.user_id,
         clientId,
-        date,
-        sets,
-        reps,
-        duration,
-        contract_time,
-        relax_time
+        values.date,
+        values.sets,
+        values.reps,
+        values.duration,
+        values.contract_time,
+        values.relax_time
       ]
     );
 
@@ -86,8 +87,7 @@ router.post('/sessions', async (req, res) => {
     console.error('保存训练记录失败:', error);
     res.status(500).json({
       success: false,
-      error: '保存训练记录失败',
-      message: error.message
+      error: '保存训练记录失败'
     });
   }
 });
@@ -97,10 +97,10 @@ router.get('/stats', async (req, res) => {
   try {
     const userId = req.query.user_id;
 
-    if (!userId) {
+    if (!validateUserId(userId)) {
       return res.status(400).json({
         success: false,
-        error: '缺少 user_id 参数'
+        error: '缺少 user_id 参数或格式无效'
       });
     }
 
@@ -143,8 +143,7 @@ router.get('/stats', async (req, res) => {
     console.error('获取统计数据失败:', error);
     res.status(500).json({
       success: false,
-      error: '获取统计数据失败',
-      message: error.message
+      error: '获取统计数据失败'
     });
   }
 });
@@ -155,16 +154,24 @@ router.delete('/sessions/:id', async (req, res) => {
     const { id } = req.params;
     const userId = req.query.user_id;
 
-    if (!userId) {
+    if (!validateUserId(userId)) {
       return res.status(400).json({
         success: false,
-        error: '缺少 user_id 参数'
+        error: '缺少 user_id 参数或格式无效'
+      });
+    }
+
+    const recordId = parseInt(id, 10);
+    if (!Number.isInteger(recordId) || recordId < 1) {
+      return res.status(400).json({
+        success: false,
+        error: '记录 id 无效'
       });
     }
 
     const [result] = await pool.query(
       `DELETE FROM kegel_sessions WHERE id = ? AND user_id = ?`,
-      [id, userId]
+      [recordId, userId]
     );
 
     if (result.affectedRows === 0) {
@@ -182,8 +189,7 @@ router.delete('/sessions/:id', async (req, res) => {
     console.error('删除记录失败:', error);
     res.status(500).json({
       success: false,
-      error: '删除记录失败',
-      message: error.message
+      error: '删除记录失败'
     });
   }
 });
