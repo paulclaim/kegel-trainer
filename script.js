@@ -643,7 +643,7 @@ class KegelTrainer {
         const totalTime = records.reduce((sum, r) => sum + Number(r.duration || 0), 0);
         this.elements.totalTime.textContent = Math.round(totalTime);
 
-        this.elements.streak.textContent = this.calculateStreak(uniqueDays);
+        this.elements.streak.textContent = DateUtils.streakFromDates(uniqueDays);
 
         this.renderHistory(records);
     }
@@ -713,28 +713,6 @@ class KegelTrainer {
                 <span class="record-duration">${Number(record.duration)} 分钟</span>
             </li>
         `).join('');
-    }
-
-    calculateStreak(days) {
-        if (days.length === 0) return 0;
-
-        const sortedDays = days.map(d => new Date(d)).sort((a, b) => b - a);
-        let streak = 0;
-        let currentDate = new Date();
-        currentDate.setHours(0, 0, 0, 0);
-
-        for (let day of sortedDays) {
-            day.setHours(0, 0, 0, 0);
-            const diffDays = DateUtils.getDaysDiff(day, currentDate);
-
-            if (diffDays === streak) {
-                streak++;
-            } else {
-                break;
-            }
-        }
-
-        return streak;
     }
 
     async updateSyncStatus(forceCheck = false) {

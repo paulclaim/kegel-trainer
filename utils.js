@@ -236,6 +236,31 @@ class DateUtils {
         return `${year}-${month}-${day}`;
     }
 
+    // 'YYYY-MM-DD' → UTC 天序号，统一日界换算，不受执行环境时区影响
+    static toDayNumber(dateString) {
+        const ms = Date.parse(`${dateString}T00:00:00Z`);
+        return Number.isNaN(ms) ? null : Math.floor(ms / 86400000);
+    }
+
+    // 连续训练天数：从今天起向前逐日计数（当天未训练则为 0，与历史行为一致）。
+    // 全程基于日期字符串计算，修复 new Date('YYYY-MM-DD') 按 UTC 解析、
+    // setHours 按本地时区写入导致的跨时区差一天问题
+    static streakFromDates(dateStrings) {
+        const dayNumbers = [...new Set(dateStrings)]
+            .map(date => this.toDayNumber(date))
+            .filter(day => day !== null)
+            .sort((a, b) => b - a);
+        if (dayNumbers.length === 0) return 0;
+
+        const today = this.toDayNumber(this.formatDate(new Date()));
+        let streak = 0;
+        for (const day of dayNumbers) {
+            if (today - day === streak) streak++;
+            else break;
+        }
+        return streak;
+    }
+
     static getDaysDiff(date1, date2) {
         const d1 = new Date(date1);
         const d2 = new Date(date2);

@@ -194,26 +194,28 @@ router.delete('/sessions/:id', async (req, res) => {
   }
 });
 
-// 计算连续天数的辅助函数
+// 计算连续天数：基于 'YYYY-MM-DD' 字符串按 UTC 日界换算，与前端
+// DateUtils.streakFromDates 保持同一语义（当天未训练则连击清零）。
+// 修复原先 new Date('YYYY-MM-DD') 按 UTC 解析 + setHours 按服务器本地
+// 时区写入导致的跨时区差一天问题
 function calculateStreak(dates) {
-  if (dates.length === 0) return 0;
+  const dayNumbers = [...new Set(dates)]
+    .map(date => Date.parse(`${date}T00:00:00Z`))
+    .filter(ms => !Number.isNaN(ms))
+    .map(ms => Math.floor(ms / 86400000))
+    .sort((a, b) => b - a);
+  if (dayNumbers.length === 0) return 0;
 
-  const sortedDates = dates.map(d => new Date(d)).sort((a, b) => b - a);
+  const now = new Date();
+  const today = Math.floor(Date.parse(
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T00:00:00Z`
+  ) / 86400000);
+
   let streak = 0;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  for (let date of sortedDates) {
-    date.setHours(0, 0, 0, 0);
-    const diffDays = Math.floor((today - date) / (1000 * 60 * 60 * 24));
-
-    if (diffDays === streak) {
-      streak++;
-    } else {
-      break;
-    }
+  for (const day of dayNumbers) {
+    if (today - day === streak) streak++;
+    else break;
   }
-
   return streak;
 }
 
