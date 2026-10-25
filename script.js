@@ -58,7 +58,8 @@ class KegelTrainer {
                      'repsPerSet', 'totalSets', 'contractTime', 'relaxTime', 'totalDays',
                      'totalSessions', 'streak', 'totalTime', 'presetBtns', 'soundToggle',
                      'syncToggle', 'syncStatus', 'reminderToggle', 'reminderTime',
-                     'startBtnLabel', 'themeBtn', 'themeMenu', 'themeGrid'];
+                     'startBtnLabel', 'themeBtn', 'themeMenu', 'themeGrid',
+                     'trainingHeatmap', 'recentRecords'];
 
         this.elements = {};
         ids.forEach(id => {
@@ -643,6 +644,75 @@ class KegelTrainer {
         this.elements.totalTime.textContent = Math.round(totalTime);
 
         this.elements.streak.textContent = this.calculateStreak(uniqueDays);
+
+        this.renderHistory(records);
+    }
+
+    /* ---------- 历史热力图与最近记录 ---------- */
+
+    renderHistory(records) {
+        this.renderHeatmap(records);
+        this.renderRecentRecords(records);
+    }
+
+    renderHeatmap(records) {
+        const container = this.elements.trainingHeatmap;
+        if (!container) return;
+
+        const minutesByDate = {};
+        records.forEach(record => {
+            const date = typeof record.date === 'string'
+                ? record.date.slice(0, 10)
+                : DateUtils.formatDate(new Date(record.date));
+            minutesByDate[date] = (minutesByDate[date] || 0) + Number(record.duration || 0);
+        });
+
+        const HEATMAP_WEEKS = 15;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // 起点对齐周一，保证每列是完整的一周
+        const start = new Date(today);
+        const weekdayIndex = (today.getDay() + 6) % 7; // 周一=0 ... 周日=6
+        start.setDate(today.getDate() - weekdayIndex - (HEATMAP_WEEKS - 1) * 7);
+
+        const totalCells = HEATMAP_WEEKS * 7;
+        const cells = [];
+        for (let i = 0; i < totalCells; i++) {
+            const day = new Date(start);
+            day.setDate(start.getDate() + i);
+            const key = DateUtils.formatDate(day);
+            const minutes = Math.round(minutesByDate[key] || 0);
+
+            if (day > today) {
+                cells.push('<div class="heat-cell empty"></div>');
+            } else if (minutes === 0) {
+                cells.push(`<div class="heat-cell l0" title="${key}"></div>`);
+            } else {
+                const level = minutes < 5 ? 'l1' : minutes < 10 ? 'l2' : 'l3';
+                cells.push(`<div class="heat-cell ${level}" title="${key}：训练 ${minutes} 分钟"></div>`);
+            }
+        }
+        container.innerHTML = cells.join('');
+    }
+
+    renderRecentRecords(records) {
+        const list = this.elements.recentRecords;
+        if (!list) return;
+
+        const recent = records.slice(-8).reverse();
+        if (recent.length === 0) {
+            list.innerHTML = '<li class="record-empty">还没有记录，完成第一次训练后显示</li>';
+            return;
+        }
+
+        list.innerHTML = recent.map(record => `
+            <li class="record-item">
+                <span class="record-date">${HTMLEscaper.escape(String(record.date).slice(0, 10))}</span>
+                <span>${Number(record.sets)}组 × ${Number(record.reps)}次</span>
+                <span class="record-duration">${Number(record.duration)} 分钟</span>
+            </li>
+        `).join('');
     }
 
     calculateStreak(days) {
