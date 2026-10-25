@@ -41,10 +41,6 @@ app.get('/api', (req, res) => {
       },
       stats: {
         get: 'GET /api/stats - 获取统计数据'
-      },
-      settings: {
-        get: 'GET /api/settings - 获取用户设置',
-        post: 'POST /api/settings - 保存用户设置'
       }
     }
   });

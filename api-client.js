@@ -87,22 +87,6 @@ class APIClient {
         return this.request(`/stats?user_id=${this.userId}`);
     }
 
-    // 获取用户设置
-    async getSettings() {
-        return this.request(`/settings?user_id=${this.userId}`);
-    }
-
-    // 保存用户设置
-    async saveSettings(settings) {
-        return this.request('/settings', {
-            method: 'POST',
-            body: JSON.stringify({
-                ...settings,
-                user_id: this.userId
-            })
-        });
-    }
-
     // 删除训练记录
     async deleteSession(sessionId) {
         return this.request(`/sessions/${sessionId}?user_id=${this.userId}`, {

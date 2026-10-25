@@ -55,22 +55,6 @@ async function initTables() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
-    // 创建用户设置表
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS kegel_settings (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id VARCHAR(255) UNIQUE NOT NULL,
-        reps_per_set INT NOT NULL,
-        total_sets INT NOT NULL,
-        contract_time INT NOT NULL,
-        relax_time INT NOT NULL,
-        sound_enabled BOOLEAN NOT NULL,
-        reminder_enabled BOOLEAN NOT NULL,
-        reminder_time TIME NOT NULL,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
     // 存量表迁移：为已存在的 kegel_sessions 补充 client_id 幂等去重支持
     // （CREATE TABLE IF NOT EXISTS 不会更新旧表结构；重复执行时忽略 1060/1061 错误）
     await migrateTable(connection, 'kegel_sessions', [
