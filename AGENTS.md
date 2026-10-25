@@ -5,9 +5,10 @@
 - `/` is a static, dependency-free front end:
   - `index.html` (UI), `style.css` (styles)
   - `script.js` (main trainer logic), `utils.js` (shared helpers), `config.js` (constants), `api-client.js` (sync client)
+  - PWA: `manifest.webmanifest`, `sw.js`, `icons/`
 - `api/` is an optional Node/Express + MySQL backend for cloud sync:
-  - `server.js` (local server), `index.js` (Vercel serverless entry), `routes.js`, `db.js`
-- Deployment/docs: `README.md`, `DATABASE_SETUP.md`, `VERCEL_DEPLOYMENT.md`, `docker-compose.yml`, `nginx.conf`.
+  - `server.js` (local server), `index.js` (Vercel serverless entry), `routes.js`, `db.js`, `validate.js`, `security.js`
+- Deployment/docs: `README.md`（含当前 Oracle VPS 生产部署说明）, `docs/`（数据库配置与各平台部署文档）, `scripts/deploy_oracle.py`, `.github/workflows/`, `docker-compose.yml`, `nginx.conf`.
 
 ## Build, Test, and Development Commands
 

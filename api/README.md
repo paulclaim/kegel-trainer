@@ -4,18 +4,17 @@
 
 ## 功能特性
 
-- ✅ 训练记录存储和查询
-- ✅ 用户设置管理
+- ✅ 训练记录存储和查询（client_id 幂等去重）
 - ✅ 统计数据计算
 - ✅ 支持多用户
 - ✅ RESTful API 设计
-- ✅ 自动创建数据库表
+- ✅ 自动创建数据库表与存量表迁移
+- ✅ 输入校验、限流与安全响应头
 
 ## 技术栈
 
 - Node.js + Express
 - MySQL 数据库
-- CORS 跨域支持
 
 ## 快速开始
 
@@ -43,6 +42,9 @@ DB_USER=你的数据库用户名
 DB_PASSWORD=你的数据库密码
 DB_NAME=cloudlib
 PORT=3000
+
+# 可选：跨域白名单（逗号分隔）。默认仅同源，分离部署前端时才需要
+# CORS_ORIGINS=https://your-frontend.example.com
 ```
 
 ### 3. 启动服务器
@@ -77,6 +79,7 @@ GET /api/sessions?user_id=xxx&limit=100&offset=0
   "data": [
     {
       "id": 1,
+      "client_id": "550e8400-e29b-41d4-a716-446655440000",
       "date": "2025-12-08",
       "sets": 3,
       "reps": 10,
@@ -90,6 +93,8 @@ GET /api/sessions?user_id=xxx&limit=100&offset=0
 }
 ```
 
+`limit` 上限 500（默认 100），`offset` 从 0 开始。
+
 #### 保存训练记录
 ```
 POST /api/sessions
@@ -97,6 +102,7 @@ Content-Type: application/json
 
 {
   "user_id": "user_xxx",
+  "client_id": "550e8400-e29b-41d4-a716-446655440000",
   "date": "2025-12-08",
   "sets": 3,
   "reps": 10,
@@ -105,6 +111,11 @@ Content-Type: application/json
   "relax_time": 5
 }
 ```
+
+带 `client_id` 时按其幂等去重：重复提交同一条记录不会产生新行
+（响应中 `inserted: false` 表示已存在）。字段校验范围：
+sets 1-20、reps 1-100、contract_time/relax_time 1-600 秒、duration 0-1440 分钟、
+date 须为合法 `YYYY-MM-DD`。
 
 #### 删除训练记录
 ```
@@ -131,30 +142,6 @@ GET /api/stats?user_id=xxx
 }
 ```
 
-### 用户设置
-
-#### 获取设置
-```
-GET /api/settings?user_id=xxx
-```
-
-#### 保存设置
-```
-POST /api/settings
-Content-Type: application/json
-
-{
-  "user_id": "user_xxx",
-  "repsPerSet": 10,
-  "totalSets": 3,
-  "contractTime": 5,
-  "relaxTime": 5,
-  "soundEnabled": true,
-  "reminderEnabled": false,
-  "reminderTime": "09:00:00"
-}
-```
-
 ## 数据库表结构
 
 ### kegel_sessions（训练记录表）
@@ -163,6 +150,7 @@ Content-Type: application/json
 |------|------|------|
 | id | INT | 主键，自增 |
 | user_id | VARCHAR(255) | 用户ID |
+| client_id | VARCHAR(36) | 客户端记录 UUID（唯一，幂等去重键，可空为历史数据） |
 | date | DATE | 训练日期 |
 | sets | INT | 组数 |
 | reps | INT | 每组次数 |
@@ -170,21 +158,6 @@ Content-Type: application/json
 | contract_time | INT | 收缩时间（秒） |
 | relax_time | INT | 放松时间（秒） |
 | created_at | TIMESTAMP | 创建时间 |
-
-### kegel_settings（用户设置表）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | INT | 主键，自增 |
-| user_id | VARCHAR(255) | 用户ID（唯一） |
-| reps_per_set | INT | 每组次数 |
-| total_sets | INT | 总组数 |
-| contract_time | INT | 收缩时间 |
-| relax_time | INT | 放松时间 |
-| sound_enabled | BOOLEAN | 音效开关 |
-| reminder_enabled | BOOLEAN | 提醒开关 |
-| reminder_time | TIME | 提醒时间 |
-| updated_at | TIMESTAMP | 更新时间 |
 
 ## 部署建议
 
@@ -224,13 +197,16 @@ server {
    - Railway
    - DigitalOcean App Platform
 
-## 安全建议
+## 安全说明
 
 1. ✅ 数据库凭证存储在 `.env` 文件中，不要提交到 Git
-2. ✅ 使用环境变量管理敏感信息
-3. ⚠️ 建议添加用户认证（JWT）
-4. ⚠️ 建议添加请求频率限制
-5. ⚠️ 生产环境使用 HTTPS
+2. ✅ 输入校验：字段范围、日期格式、分页上限（`validate.js`）
+3. ✅ 按 IP 限流：默认 120 次/分钟（`security.js`，内存实现）
+4. ✅ CORS 默认仅同源，跨域需显式配置 `CORS_ORIGINS`
+5. ✅ 错误响应不回传内部错误详情，仅保留服务端日志
+6. ⚠️ user_id 目前为客户端自生成的随机 UUID（无鉴权），
+   适用于个人/低敏感场景；如需更强隔离可引入访问令牌
+7. ⚠️ 生产环境使用 HTTPS
 
 ## 故障排查
 
