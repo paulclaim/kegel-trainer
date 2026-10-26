@@ -45,6 +45,7 @@ const CONFIG = {
         records: 'kegelRecords',
         reminders: 'kegelReminders',
         progress: 'kegelProgress',
+        tipDismissed: 'kegelTipDismissed',
         syncEnabled: 'sync_enabled',
         userId: 'kegel_user_id',
         legacyMigrated: 'kegel_legacy_migrated'

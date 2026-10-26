@@ -72,3 +72,4 @@ ENV/
 
 # AI 工具
 .claude/
+gui-test-screenshots/

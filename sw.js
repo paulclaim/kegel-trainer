@@ -1,7 +1,7 @@
 // Service Worker：为静态前端提供离线能力
 // 策略：HTML/CSS/JS 网络优先（保证部署后拿到新版本），失败回退缓存；
 //      API 请求始终直连网络，离线场景由应用层的待同步队列兜底。
-const CACHE_VERSION = 'kegel-static-v1';
+const CACHE_VERSION = 'kegel-static-v2';
 
 const PRECACHE_URLS = [
     './',

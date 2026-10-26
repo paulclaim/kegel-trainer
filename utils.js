@@ -173,8 +173,32 @@ class Modal {
                 </div>
             `;
 
+            modal.setAttribute('role', 'dialog');
+            modal.setAttribute('aria-modal', 'true');
+            modal.setAttribute('aria-label', title);
             document.body.appendChild(modal);
             setTimeout(() => modal.classList.add('show'), 10);
+
+            // 聚焦主按钮；Esc 关闭；Tab 在按钮间循环（焦点圈闭）
+            const btns = Array.from(modal.querySelectorAll('.modal-btn'));
+            const initialFocus = modal.querySelector('.modal-btn.btn-primary') || btns[0];
+            if (initialFocus) initialFocus.focus();
+
+            modal.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    this.close(modal, resolve, -1);
+                    return;
+                }
+                if (e.key === 'Tab' && btns.length > 0) {
+                    e.preventDefault();
+                    const index = btns.indexOf(document.activeElement);
+                    const next = e.shiftKey
+                        ? (index <= 0 ? btns.length - 1 : index - 1)
+                        : (index === -1 || index === btns.length - 1 ? 0 : index + 1);
+                    btns[next].focus();
+                }
+            });
 
             modal.addEventListener('click', (e) => {
                 if (e.target.classList.contains('modal-overlay')) {

@@ -9,10 +9,13 @@ class KegelTrainer {
         this.timeLeft = 0;
         this.restTime = CONFIG.DEFAULT_SETTINGS.restTime;
         this.completeTimeout = null;
+        this.celebrateTimer = null;
 
         // 基于时间戳的计时器状态
         this.timerStartTime = null;
         this.timerDuration = 0;
+        // 当前阶段总时长（秒），驱动阶段环形进度
+        this.phaseTotal = 0;
 
         // 主题状态
         this.currentTheme = null;
@@ -35,6 +38,8 @@ class KegelTrainer {
         this.loadSettings();
         this.initThemeUI();
         this.initTabs();
+        this.initPresetMeta();
+        this.initTipBar();
         this.bindKeyboardShortcuts();
         this.updateProgress();
         this.loadReminderSettings();
@@ -53,13 +58,15 @@ class KegelTrainer {
     }
 
     initElements() {
-        const ids = ['startBtn', 'pauseBtn', 'resetBtn', 'exportBtn', 'importBtn', 'currentSet',
-                     'currentRep', 'timer', 'actionText', 'progressRing', 'animationCircle',
+        const ids = ['startBtn', 'pauseBtn', 'resetBtn', 'exportBtn', 'importBtn', 'skipRestBtn',
+                     'currentSet', 'currentRep', 'timer', 'timerUnit', 'actionText', 'progressRing',
+                     'animationCircle', 'sessionBar', 'sessionBarFill', 'sessionProgressLabel',
                      'repsPerSet', 'totalSets', 'contractTime', 'relaxTime', 'totalDays',
                      'totalSessions', 'streak', 'totalTime', 'presetBtns', 'soundToggle',
                      'syncToggle', 'syncStatus', 'reminderToggle', 'reminderTime',
                      'startBtnLabel', 'themeBtn', 'themeMenu', 'themeGrid',
-                     'trainingHeatmap', 'recentRecords'];
+                     'trainingHeatmap', 'recentRecords', 'helpBtn', 'tipBar', 'tipClose',
+                     'paramsHint'];
 
         this.elements = {};
         ids.forEach(id => {
@@ -74,6 +81,8 @@ class KegelTrainer {
         this.elements.resetBtn?.addEventListener('click', () => this.reset());
         this.elements.exportBtn?.addEventListener('click', () => this.exportData());
         this.elements.importBtn?.addEventListener('click', () => this.importData());
+        this.elements.skipRestBtn?.addEventListener('click', () => this.skipRest());
+        this.elements.helpBtn?.addEventListener('click', () => this.showHelp());
         this.elements.themeBtn?.addEventListener('click', () => this.toggleThemeMenu());
         this.elements.soundToggle?.addEventListener('change', (e) => {
             this.audioManager.enabled = e.target.checked;
@@ -157,6 +166,9 @@ class KegelTrainer {
         StorageManager.set(CONFIG.STORAGE_KEYS.settings, settings);
         this.audioManager.enabled = settings.soundEnabled;
         this.updatePresetHighlight();
+        this.updateParamsHint();
+        // 参数或预设变更后同步刷新总进度（总次数随之变化）
+        this.updateProgress();
     }
 
     /* ---------- 主题系统 ---------- */
@@ -339,6 +351,53 @@ class KegelTrainer {
         });
     }
 
+    /* ---------- 预设时长与参数提示 ---------- */
+
+    initPresetMeta() {
+        this.presetBtns?.forEach(btn => {
+            const preset = CONFIG.PRESETS[btn.dataset.preset];
+            const meta = btn.querySelector('.preset-meta');
+            if (preset && meta) {
+                meta.textContent = `约 ${this.estimateDuration(preset)} 分钟`;
+            }
+        });
+        this.updateParamsHint();
+    }
+
+    // 预计时长（分钟）：收缩+放松主动时长 + 组间休息
+    estimateDuration(s) {
+        const active = s.totalSets * s.repsPerSet * (s.contractTime + s.relaxTime);
+        const rest = Math.max(s.totalSets - 1, 0) * (s.restTime || 0);
+        return Math.max(Math.round((active + rest) / 60), 1);
+    }
+
+    updateParamsHint() {
+        const hint = this.elements.paramsHint;
+        if (!hint) return;
+        const s = this.getSettings();
+        hint.textContent = `预计 ${this.estimateDuration(s)} 分钟 · 共 ${s.totalSets} 组 × ${s.repsPerSet} 次`;
+    }
+
+    /* ---------- 首次引导与帮助 ---------- */
+
+    initTipBar() {
+        if (!this.elements.tipBar) return;
+        if (!StorageManager.get(CONFIG.STORAGE_KEYS.tipDismissed, false)) {
+            this.elements.tipBar.hidden = false;
+        }
+        this.elements.tipClose?.addEventListener('click', () => {
+            this.elements.tipBar.hidden = true;
+            StorageManager.set(CONFIG.STORAGE_KEYS.tipDismissed, true);
+        });
+    }
+
+    showHelp() {
+        Modal.show('使用说明',
+            '跟随圆圈的节奏训练：提示「夹紧」时收缩盆底肌并保持到倒计时结束，提示「放松」时缓慢松开。' +
+            '快捷键：空格 开始/暂停，R 重置，T 切换主题。训练参数与数据管理在右侧面板。',
+            [{ text: '知道了', primary: true }]);
+    }
+
     loadReminderSettings() {
         const reminders = StorageManager.get(CONFIG.STORAGE_KEYS.reminders, { enabled: false, time: '09:00' });
         if (this.elements.reminderToggle) {
@@ -370,7 +429,7 @@ class KegelTrainer {
         });
         this.restTime = settings.restTime || CONFIG.DEFAULT_SETTINGS.restTime;
         this.saveSettings();
-        Modal.show('预设已加载', `已应用${preset === 'beginner' ? '初级' : preset === 'intermediate' ? '中级' : '高级'}训练计划`);
+        Toast.show(`已应用${preset === 'beginner' ? '初级' : preset === 'intermediate' ? '中级' : '高级'}训练计划`);
     }
 
     async start() {
@@ -385,6 +444,8 @@ class KegelTrainer {
         this.isRunning = true;
         this.currentPhase = 'contract';
         this.timeLeft = this.getSettings().contractTime;
+        this.phaseTotal = this.timeLeft;
+        this.updateSkipRestVisibility();
 
         this.updateActionText('夹紧', 'contract');
         this.audioManager.play('contract');
@@ -400,13 +461,15 @@ class KegelTrainer {
         this.isRunning = false;
         clearInterval(this.timer);
         this.updateButtons();
-        this.elements.timer.textContent = '已暂停';
+        this.updateSkipRestVisibility();
+        this.setTimerText('已暂停');
     }
 
     resume() {
         this.isPaused = false;
         this.isRunning = true;
         this.clearCompletionPrompt();
+        this.updateSkipRestVisibility();
         this.startTimer();
         this.updateButtons();
     }
@@ -426,10 +489,14 @@ class KegelTrainer {
         this.updateUI();
         this.updateButtons();
         this.updateProgress();
+        this.setRingProgress(0);
+        this.updateSkipRestVisibility();
 
-        this.elements.timer.textContent = '准备开始';
+        this.setTimerText('准备开始');
         this.updateActionText('准备开始', '');
         this.elements.animationCircle.className = 'animation-circle';
+        document.querySelector('.stage')?.classList.remove('celebrate');
+        clearTimeout(this.celebrateTimer);
     }
 
     nextPhase() {
@@ -438,6 +505,7 @@ class KegelTrainer {
         if (this.currentPhase === 'contract') {
             this.currentPhase = 'relax';
             this.timeLeft = settings.relaxTime;
+            this.phaseTotal = this.timeLeft;
             this.updateActionText('放松', 'relax');
             this.audioManager.play('relax');
             VibrationManager.vibrate(100);
@@ -454,12 +522,13 @@ class KegelTrainer {
                 } else {
                     this.currentPhase = 'rest';
                     this.timeLeft = settings.restTime;
+                    this.phaseTotal = this.timeLeft;
                     this.updateActionText('休息', '');
-                    this.elements.timer.textContent = `组间休息 ${this.timeLeft}秒`;
                 }
             } else {
                 this.currentPhase = 'contract';
                 this.timeLeft = settings.contractTime;
+                this.phaseTotal = this.timeLeft;
                 this.updateActionText('夹紧', 'contract');
                 this.audioManager.play('contract');
                 VibrationManager.vibrate(200);
@@ -467,6 +536,7 @@ class KegelTrainer {
         } else if (this.currentPhase === 'rest') {
             this.currentPhase = 'contract';
             this.timeLeft = settings.contractTime;
+            this.phaseTotal = this.timeLeft;
             this.updateActionText('夹紧', 'contract');
             this.audioManager.play('contract');
             VibrationManager.vibrate(200);
@@ -474,6 +544,8 @@ class KegelTrainer {
 
         this.updateUI();
         this.updateProgress();
+        this.updatePhaseRing();
+        this.updateSkipRestVisibility();
 
         // 重新启动计时器以继续下一阶段
         this.startTimer();
@@ -490,13 +562,24 @@ class KegelTrainer {
         clearInterval(this.timer);
         await this.wakeLockManager.release();
 
-        this.elements.timer.textContent = '训练完成！';
+        this.currentPhase = 'done';
+        this.setTimerText('完成');
+        this.setRingProgress(1);
         this.updateActionText('完成', '');
         this.updateButtons();
         this.updateProgress();
+        this.updateSkipRestVisibility();
 
         this.recordSession();
         VibrationManager.vibrate([200, 100, 200]);
+
+        // 完成庆祝：舞台辉光 + 呼吸球跳动
+        const stage = document.querySelector('.stage');
+        if (stage) {
+            stage.classList.add('celebrate');
+            clearTimeout(this.celebrateTimer);
+            this.celebrateTimer = setTimeout(() => stage.classList.remove('celebrate'), 3300);
+        }
 
         this.clearCompletionPrompt();
         this.completeTimeout = setTimeout(async () => {
@@ -527,21 +610,88 @@ class KegelTrainer {
             if (startLabel) startLabel.textContent = '开始训练';
             this.elements.pauseBtn.disabled = true;
         }
+
+        // 训练进行中锁定参数与预设，避免中途改动导致进度错乱
+        const locked = this.isRunning || this.isPaused;
+        ['repsPerSet', 'totalSets', 'contractTime', 'relaxTime'].forEach(id => {
+            const el = this.elements[id];
+            if (el) el.disabled = locked;
+        });
+        this.presetBtns?.forEach(btn => {
+            btn.disabled = locked;
+        });
     }
 
+    // 总进度：更新会话进度条与计数标签
     updateProgress() {
-        const ring = this.elements.progressRing;
-        if (!ring) return;
-
         const settings = this.getSettings();
         const totalReps = settings.totalSets * settings.repsPerSet;
-        const completedReps = (this.currentSet - 1) * settings.repsPerSet + (this.currentRep - 1);
-        const progress = Math.min((completedReps / totalReps) * 100, 100);
+        const doneReps = Math.min((this.currentSet - 1) * settings.repsPerSet + (this.currentRep - 1), totalReps);
+
+        if (this.elements.sessionBarFill) {
+            this.elements.sessionBarFill.style.width = `${(doneReps / totalReps) * 100}%`;
+        }
+        if (this.elements.sessionBar) {
+            this.elements.sessionBar.setAttribute('aria-valuemax', String(totalReps));
+            this.elements.sessionBar.setAttribute('aria-valuenow', String(doneReps));
+        }
+        if (this.elements.sessionProgressLabel) {
+            this.elements.sessionProgressLabel.textContent = `${doneReps} / ${totalReps} 次`;
+        }
+    }
+
+    // 阶段进度：收缩时环形填充、放松时退去（基于剩余时间，暂停/恢复后连续）
+    updatePhaseRing() {
+        const total = this.phaseTotal || this.timeLeft || 1;
+        let progress = 0;
+        if (this.currentPhase === 'contract') {
+            progress = 1 - this.timeLeft / total;
+        } else if (this.currentPhase === 'relax') {
+            progress = this.timeLeft / total;
+        }
+        this.setRingProgress(Math.min(Math.max(progress, 0), 1));
+    }
+
+    setRingProgress(progress) {
+        const ring = this.elements.progressRing;
+        if (!ring) return;
 
         const radius = parseFloat(ring.getAttribute('r')) || 130;
         const circumference = 2 * Math.PI * radius;
         ring.style.strokeDasharray = `${circumference}`;
-        ring.style.strokeDashoffset = `${circumference * (1 - progress / 100)}`;
+        ring.style.strokeDashoffset = `${circumference * (1 - progress)}`;
+        ring.classList.toggle('relax', this.currentPhase === 'relax');
+    }
+
+    // 倒计时数字（显示在圆环中心）
+    renderTimerCount() {
+        const timer = this.elements.timer;
+        if (!timer) return;
+        timer.classList.add('is-count');
+        timer.classList.toggle('countdown-warning',
+            this.timeLeft <= CONFIG.TIMING.COUNTDOWN_WARNING && this.timeLeft > 0);
+        timer.textContent = this.timeLeft;
+        if (this.elements.timerUnit) this.elements.timerUnit.hidden = false;
+    }
+
+    // 状态文字（准备/暂停/完成等）
+    setTimerText(text) {
+        const timer = this.elements.timer;
+        if (!timer) return;
+        timer.classList.remove('is-count', 'countdown-warning');
+        timer.textContent = text;
+        if (this.elements.timerUnit) this.elements.timerUnit.hidden = true;
+    }
+
+    updateSkipRestVisibility() {
+        if (!this.elements.skipRestBtn) return;
+        this.elements.skipRestBtn.hidden = !(this.isRunning && this.currentPhase === 'rest');
+    }
+
+    skipRest() {
+        if (!this.isRunning || this.currentPhase !== 'rest') return;
+        clearInterval(this.timer);
+        this.nextPhase();
     }
 
     handleSyncToggle(enabled) {
@@ -575,22 +725,19 @@ class KegelTrainer {
         this.timerStartTime = Date.now();
         this.timerDuration = this.timeLeft * 1000;
 
+        // 立即渲染当前秒数，避免阶段切换瞬间残留上一阶段末值
+        this.renderTimerCount();
+
         const tick = () => {
             const elapsed = Date.now() - this.timerStartTime;
             const remaining = Math.ceil((this.timerDuration - elapsed) / 1000);
 
+            // 环形进度每 tick 平滑推进
+            this.updatePhaseRing();
+
             if (remaining !== this.timeLeft) {
                 this.timeLeft = Math.max(remaining, 0);
-
-                // 倒计时最后3秒警告
-                if (this.timeLeft <= CONFIG.TIMING.COUNTDOWN_WARNING && this.timeLeft > 0) {
-                    this.elements.timer.classList.add('countdown-warning');
-                    this.elements.timer.textContent = `${this.timeLeft}秒`;
-                } else {
-                    this.elements.timer.classList.remove('countdown-warning');
-                    this.elements.timer.textContent = `${this.timeLeft}秒`;
-                }
-
+                this.renderTimerCount();
                 this.updateTitle();
             }
 
@@ -882,6 +1029,7 @@ class KegelTrainer {
     cleanup() {
         clearInterval(this.timer);
         clearInterval(this.reminderInterval);
+        clearTimeout(this.celebrateTimer);
         this.wakeLockManager.release();
     }
 
@@ -904,6 +1052,7 @@ class KegelTrainer {
             currentRep: this.currentRep,
             currentPhase: this.currentPhase,
             timeLeft: this.timeLeft,
+            phaseTotal: this.phaseTotal,
             isPaused: this.isPaused,
             savedAt: Date.now()
         };
@@ -937,13 +1086,15 @@ class KegelTrainer {
             this.currentRep = progress.currentRep;
             this.currentPhase = progress.currentPhase;
             this.timeLeft = progress.timeLeft;
+            this.phaseTotal = progress.phaseTotal || progress.timeLeft;
             this.isPaused = true;
             this.isRunning = false;
 
             this.updateUI();
             this.updateProgress();
+            this.updatePhaseRing();
             this.updateButtons();
-            this.elements.timer.textContent = '已暂停';
+            this.setTimerText('已暂停');
 
             const phaseText = progress.currentPhase === 'contract' ? '夹紧' :
                              progress.currentPhase === 'relax' ? '放松' : '休息';
